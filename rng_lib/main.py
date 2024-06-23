@@ -1,124 +1,232 @@
 import requests
+import uuid
+from typing import Optional, Any, TypedDict, Union, TypeVar, Generic
+
+
+class RequestsInstance(requests.Session):
+    def __init__(self, base_url):
+        super().__init__()
+        self.base_url = base_url
+        self.headers.update({
+            'Content-Type': 'application/json'
+        })
+
+    def request(self, method, url, *args, **kwargs):
+        url = self.base_url + url
+        return super().request(method, url, *args, **kwargs)
+
+
+T = TypeVar('T')
+
+
+class BaseResponse(Generic[T], TypedDict):
+    data: T
+    success: bool
+    error: Any
+
+
+class InitData(TypedDict):
+    txHash: str
+    datum: str
+    rngfid: str
+    rnlen: int
+
+
+class MintData(TypedDict):
+    txHash: str
+    oracleDIDUnit: str
+
+
+class RegisterData(TypedDict):
+    txHash: str
+    oracleDIDUnit: str
+    rngOutput: str
+
+
+class UpdateData(TypedDict):
+    txHash: str
+    oracleDIDUnit: str
+    rngOutput: str
+
+
+class QueryData(TypedDict):
+    rngOutput: str
+
 
 class RNG:
-    def __init__(self, network: int, blockfrostApiKey: str, walletSeed: str, CBORhex: str, rngfid: str, rnlen: int, ogmiosUrl: str, RNG_API_URL: str = ""):
+    def __init__(self,
+                 network: 0 | 1,
+                 blockfrostApiKey: str,
+                 walletSeed: str,
+                 oracleCBOR: str,
+                 rngCBOR: str,
+                 ogmiosUrl: str,
+                 rngAPIURL: str,
+                 rngfid: Optional[str] = None,
+                 rngOutputLen: int = 4,
+                 ):
         self.network = network
         self.blockfrostApiKey = blockfrostApiKey
         self.walletSeed = walletSeed
-        self.CBORhex = CBORhex
-        self.rngfid = rngfid
-        self.rnlen = rnlen
-        self.ogmiosUrl = ogmiosUrl
-        self.RNG_API_URL = RNG_API_URL
-    
+        self.oracleCBOR = oracleCBOR
+        self.rngCBOR = rngCBOR
+        self.rngfid = rngfid if rngfid is not None else self.getRandomID()
+        self.rngOutputLen = rngOutputLen
+        self.ogmiosURL = ogmiosUrl
+
+        self.instance = RequestsInstance(rngAPIURL)
+
+
     def __str__(self):
         return "{\n" + ",\n".join([f'  "{key}": {getattr(self, key)!r}' for key in vars(self)]) + "\n}"
-    
-    def initiate(self):
+
+    def init(self) -> BaseResponse[InitData]:
+        """
+            Initiate RNG DID function.
+
+            Returns:
+            txHash: Transaction hash of initiated RNG ID
+            datum: Datum Hash
+            rngfid: RNG ID
+            rnlen: Random Number Length
+        """
         try:
-            url = f"{self.RNG_API_URL}/api/initiate"
-            headers = {
-                "Content-Type": "application/json",
-            }
             data = {
                 "network": self.network,
                 "blockfrostApiKey": self.blockfrostApiKey,
                 "walletSeed": self.walletSeed,
-                "CBORhex": self.CBORhex,
+                "CBORhex": self.rngCBOR,
                 "rngfid": self.rngfid,
-                "rnlen": self.rnlen,
+                "rnlen": self.rngOutputLen,
             }
+            response = self.instance.post("/api/rng/generate", json=data)
 
-            response = requests.post(url, headers=headers, json=data)
+            resData = response.json()
 
-            if not response.ok:
-                errorResJson = response.json()
-                print(errorResJson)
-                raise Exception("Failed to initiate RNG")
+            return BaseResponse[InitData](resData)
+        except Exception as e:
+            raise Exception(f"An unexpected error occurred: {str(e)}")
 
-            responseData = response.json()
-            return responseData
-        except:
-            raise Exception("Error initiating RNG")
-        
-    def mintOracleDid(self, assetName: str):
+    def mint(self, oracleDIDName: str) -> BaseResponse[MintData]:
+        """
+            Mint Oracle DID function.
+
+            Parameters:
+            oracleDIDName: Name of the Oracle DID (UTF-8 encoded)
+
+            Returns:
+            txHash: Transaction hash of Mint
+            oracleDIDUnit: Unit ID of Oracle DID
+        """
         try:
-            url = f"{self.RNG_API_URL}/api/mint-oracle"
-            headers = {
-                "Content-Type": "application/json",
-            }
             data = {
                 "network": self.network,
                 "blockfrostApiKey": self.blockfrostApiKey,
                 "walletSeed": self.walletSeed,
-                "assetName": assetName,
+                "oracleDIDName": oracleDIDName,
             }
+            response = self.instance.post("/api/oracle/mint", json=data)
 
-            response = requests.post(url, headers=headers, json=data)
+            resData = response.json()
 
-            if not response.ok:
-                errorResJson = response.json()
-                print(errorResJson)
-                raise Exception("Failed to mint oracle DID")
+            return BaseResponse[MintData](resData)
+        except Exception as e:
+            raise Exception(f"An unexpected error occurred: {str(e)}")
 
-            responseData = response.json()
-            return responseData
-        except Exception as error:
-            raise Exception("Error minting oracle DID")
+    def register(self, oracleDIDUnit: str, initRNGTx: str) -> BaseResponse[RegisterData]:
+        """
+            Register Oracle DID function.
 
-    def didRegister(self,initiator: str,seedtxid: str,oracleDid: str):
+            Parameters:
+            initRNGTx: Transaction hash of initiated RNG ID
+            oracleDIDName: Name of the Oracle DID (UTF-8 encoded)
+
+            Returns:
+            txHash: Transaction hash of regitered Oracle DID
+            oracleDIDUnit: Unit ID of Oracle DID
+            rngOutput: Random number from the Oracle
+        """
         try:
-            url=f"{self.RNG_API_URL}/api/did-register"
-            headers= {
-                'Content-Type': 'application/json'
-            }
             data = {
                 "network": self.network,
                 "blockfrostApiKey": self.blockfrostApiKey,
-                "ogmiosUrl": self.ogmiosUrl,
                 "walletSeed": self.walletSeed,
-                "CBORhex": self.CBORhex,
-                "initiator": initiator,
+                "CBORhex": self.oracleCBOR,
+                "ogmiosUrl": self.ogmiosURL,
                 "rngfid": self.rngfid,
-                "seedtxid": seedtxid,
-                "rnlen": self.rnlen,
-                "oracleDid": oracleDid,
+                "rnlen": self.rngOutputLen,
+                "initRNGTx": initRNGTx,
+                "oracleDIDUnit": oracleDIDUnit,
             }
-            response = requests.post(url,headers=headers,json=data)
-            if not response.ok:
-                raise Exception("Failed to register")
-            responseData=response.json()
-            return responseData
-        except Exception as err:
-            raise Exception("Error registering oracle DID")
+            response = self.instance.post("/api/oracle/register", json=data)
 
-    def updateOracle(self, initiator: str,lastUpdatedTx: str, oracleDid: str, seedtxid: str):
+            resData = response.json()
+
+            return BaseResponse[RegisterData](resData)
+        except Exception as e:
+            raise Exception(f"An unexpected error occurred: {str(e)}")
+
+    def update(self, oracleDIDUnit: str, initRNGTx: str, currUpdatedOracleDIDTx: str) -> BaseResponse[UpdateData]:
+        """
+            Update Oracle DID function.
+
+            Parameters:
+            initRNGTx: Transaction hash of initiated RNG ID
+            oracleDIDName: Name of the Oracle DID (UTF-8 encoded)
+            currUpdatedOracleDIDTx: Latest Oracle DID transaction hash for UTXO reference in the contract
+
+            Returns:
+            txHash: Transaction hash of regitered Oracle DID
+            oracleDIDUnit: Unit ID of Oracle DID
+            rngOutput: Random number from the Oracle
+        """
         try:
-            url = f"{self.RNG_API_URL}/api/update-oracle"
-            headers = {
-                'Content-Type': 'application/json',
-            }
             data = {
                 "network": self.network,
                 "blockfrostApiKey": self.blockfrostApiKey,
-                "ogmiosUrl": self.ogmiosUrl,
                 "walletSeed": self.walletSeed,
-                "CBORhex": self.CBORhex,
-                "initiator": initiator,
+                "CBORhex": self.oracleCBOR,
+                "ogmiosUrl": self.ogmiosURL,
                 "rngfid": self.rngfid,
-                "seedtxid": seedtxid,
-                "rnlen": self.rnlen,
-                "lastUpdatedTx": lastUpdatedTx,
-                "oracleDid": oracleDid,
+                "rnlen": self.rngOutputLen,
+                "initRNGTx": initRNGTx,
+                "oracleDIDUnit": oracleDIDUnit,
+                "currUpdatedOracleDIDTx": currUpdatedOracleDIDTx,
             }
 
-            response = requests.post(url, headers=headers, json=data)
+            response = self.instance.post("/api/oracle/update", json=data)
 
-            if not response.ok:
-                raise Exception("Failed to update oracle")
+            resData = response.json()
 
-            responseData = response.json()
-            return responseData
-        except Exception as error:
-            raise Exception("Error updating oracle")
+            return BaseResponse[UpdateData](resData)
+        except Exception as e:
+            raise Exception(f"An unexpected error occurred: {str(e)}")
 
+    def query(self, currUpdatedOracleDIDTx: str) -> BaseResponse[QueryData]:
+        """
+            Update Oracle DID function.
+
+            Parameters:
+            currUpdatedOracleDIDTx: Latest Oracle DID transaction hash for UTXO reference in the contract
+
+            Returns:
+            rngOutput: Random number from the Oracle
+        """
+        try:
+            data = {
+                "network": self.network,
+                "blockfrostApiKey": self.blockfrostApiKey,
+                "currUpdatedOracleDIDTx": currUpdatedOracleDIDTx,
+            }
+
+            response = self.instance.post("/api/oracle/query", json=data)
+
+            resData = response.json()
+
+            return BaseResponse[QueryData](resData)
+        except Exception as e:
+            raise Exception(f"An unexpected error occurred: {str(e)}")
+
+    def getRandomID(self) -> str:
+        id = str(uuid.uuid4()).replace('-', '')[:24]
+        return f'rngfid_{id}'
