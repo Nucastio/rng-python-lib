@@ -158,4 +158,4 @@ print(random_id)
 
 ### CLI App
 
-For integrating this library, you can refer to this [repository](https://github.com/Nucastio/rng-py-cli).
+For integrating this library, you can refer to this [repository](https://github.com/Nucastio/rng-py-example).
